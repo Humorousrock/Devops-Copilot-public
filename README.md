@@ -208,3 +208,8 @@ MIT License
 
 Aman Rana
 GitHub: https://github.com/Humorousrock
+
+<img width="1907" height="917" alt="image" src="https://github.com/user-attachments/assets/f3864843-5532-43e5-96d7-abfa4c363acc" />
+
+<img width="1912" height="933" alt="image" src="https://github.com/user-attachments/assets/0c869047-eb79-4c49-bb07-b225c0bb92fb" />
+
