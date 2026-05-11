@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+notepad.py
+backend/__pycache__/
+frontend/__pycache__/
+*.log
+.vscode/

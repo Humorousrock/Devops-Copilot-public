@@ -1,0 +1,122 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: logagent
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gemini-secret
+  namespace: logagent
+type: Opaque
+stringData:
+  GEMINI_API_KEY: "your-key-here"  # kubectl create secret generic gemini-secret --from-literal=GEMINI_API_KEY=xxx
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logagent-backend
+  namespace: logagent
+  labels:
+    app: logagent-backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: logagent-backend
+  template:
+    metadata:
+      labels:
+        app: logagent-backend
+    spec:
+      containers:
+        - name: backend
+          image: logagent-backend:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: gemini-secret
+                  key: GEMINI_API_KEY
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: logagent-backend-svc
+  namespace: logagent
+spec:
+  selector:
+    app: logagent-backend
+  ports:
+    - port: 8000
+      targetPort: 8000
+  type: ClusterIP
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logagent-frontend
+  namespace: logagent
+  labels:
+    app: logagent-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: logagent-frontend
+  template:
+    metadata:
+      labels:
+        app: logagent-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: nginx:alpine
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: logagent-frontend-svc
+  namespace: logagent
+spec:
+  selector:
+    app: logagent-frontend
+  ports:
+    - port: 80
+      targetPort: 80
+  type: LoadBalancer

@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Log Agent — Agentic DevOps Analyzer</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,600;1,400&family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --bg: #08090c;
+  --s0: #0c0f16;
+  --s1: #111620;
+  --s2: #161d2c;
+  --border: #1f2d45;
+  --border2: #2a3f5c;
+  --green: #00ff88;
+  --cyan: #00d4ff;
+  --amber: #ffb627;
+  --red: #ff4560;
+  --purple: #a78bfa;
+  --muted: #3d5470;
+  --text: #b8cce0;
+  --bright: #e4eef8;
+}
+
+*{margin:0;padding:0;box-sizing:border-box}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Grid noise texture */
+body::before {
+  content:'';position:fixed;inset:0;
+  background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.015) 1px, transparent 0);
+  background-size: 32px 32px;
+  pointer-events: none;z-index:0;
+}
+
+header {
+  position: relative;z-index:10;
+  display: flex;align-items:center;justify-content:space-between;
+  padding: 0 28px;height: 56px;
+  border-bottom: 1px solid var(--border);
+  background: var(--s0);
+}
+
+.logo {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 22px;letter-spacing: 2px;
+  color: var(--bright);
+  display:flex;align-items:center;gap:10px;
+}
+
+.logo-badge {
+  background: var(--green);color:#000;
+  font-family:'DM Sans',sans-serif;
+  font-size:9px;font-weight:500;letter-spacing:1.5px;
+  padding:3px 7px;border-radius:3px;text-transform:uppercase;
+}
+
+.hdr-right {
+  display:flex;align-items:center;gap:12px;font-size:12px;color:var(--muted);
+  font-family:'IBM Plex Mono',monospace;
+}
+
+.hdr-pill {
+  padding:4px 10px;border-radius:20px;
+  border:1px solid var(--border);
+  cursor:pointer;transition:all .2s;
+  display:flex;align-items:center;gap:6px;
+}
+.hdr-pill:hover{border-color:var(--cyan);color:var(--cyan);}
+.hdr-pill.active{border-color:var(--green);color:var(--green);}
+.hdr-dot{width:6px;height:6px;border-radius:50%;background:currentColor;}
+
+/* Layout */
+.layout {
+  display:grid;
+  grid-template-columns: 1fr 440px;
+  height: calc(100vh - 56px);
+  position:relative;z-index:1;
+}
+
+/* Left — input panel */
+.input-panel {
+  border-right:1px solid var(--border);
+  display:flex;flex-direction:column;
+  overflow:hidden;
+}
+
+.panel-header {
+  padding:16px 20px 12px;
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;
+}
+
+.panel-title {
+  font-family:'IBM Plex Mono',monospace;
+  font-size:11px;letter-spacing:2px;text-transform:uppercase;
+  color:var(--muted);
+}
+
+.panel-title span{color:var(--cyan);}
+
+.btn-row {
+  display:flex;gap:8px;
+}
+
+.btn {
+  font-family:'IBM Plex Mono',monospace;
+  font-size:11px;padding:6px 14px;border-radius:4px;
+  cursor:pointer;transition:all .18s;border:1px solid var(--border);
+  background:transparent;color:var(--muted);letter-spacing:.5px;
+}
+
+.btn:hover{border-color:var(--text);color:var(--text);}
+
+.btn-run {
+  background: var(--green);color:#000;border:none;
+  font-weight:500;letter-spacing:1px;
+  display:flex;align-items:center;gap:6px;
+}
+
+.btn-run:hover{background:#2dffa0;transform:translateY(-1px);}
+.btn-run:disabled{opacity:.4;transform:none;cursor:not-allowed;}
+
+.btn-run .spinner {
+  width:12px;height:12px;border:2px solid rgba(0,0,0,.2);
+  border-top-color:#000;border-radius:50%;
+  animation:spin .7s linear infinite;display:none;
+}
+
+.btn-run.loading .spinner{display:block;}
+.btn-run.loading .run-arrow{display:none;}
+
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Log textarea */
+.log-input-wrap {
+  flex:1;overflow:hidden;display:flex;flex-direction:column;
+}
+
+.toolbar {
+  padding:10px 20px;
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:8px;
+  flex-wrap:wrap;
+}
+
+.sample-btn {
+  font-family:'IBM Plex Mono',monospace;
+  font-size:10px;padding:4px 10px;border-radius:3px;
+  border:1px solid var(--border);background:transparent;
+  color:var(--muted);cursor:pointer;transition:all .15s;
+}
+
+.sample-btn:hover{border-color:var(--amber);color:var(--amber);}
+
+.log-textarea {
+  flex:1;width:100%;
+  background:transparent;
+  border:none;outline:none;
+  font-family:'IBM Plex Mono',monospace;
+  font-size:12px;line-height:1.7;
+  color:var(--text);
+  padding:16px 20px;
+  resize:none;
+  overflow-y:auto;
+}
+
+.log-textarea::placeholder{color:var(--muted);}
+
+.log-textarea::-webkit-scrollbar{width:4px;}
+.log-textarea::-webkit-scrollbar-track{background:transparent;}
+.log-textarea::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+
+/* Config bar */
+.config-bar {
+  padding:10px 20px;
+  border-top:1px solid var(--border);
+  background:var(--s0);
+  display:flex;gap:8px;align-items:center;
+}
+
+.config-bar input {
+  flex:1;background:var(--s1);border:1px solid var(--border);
+  border-radius:4px;color:var(--text);
+  font-family:'IBM Plex Mono',monospace;font-size:11px;
+  padding:7px 12px;outline:none;transition:border-color .2s;
+}
+
+.config-bar input:focus{border-color:var(--green);}
+.config-bar input::placeholder{color:var(--muted);}
+
+/* Right — agent panel */
+.agent-panel {
+  display:flex;flex-direction:column;overflow:hidden;
+}
+
+.agent-header {
+  padding:16px 20px 12px;
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;
+}
+
+.agent-steps {
+  flex:1;overflow-y:auto;padding:16px;
+  display:flex;flex-direction:column;gap:10px;
+}
+
+.agent-steps::-webkit-scrollbar{width:4px;}
+.agent-steps::-webkit-scrollbar-track{background:transparent;}
+.agent-steps::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+
+/* Empty state */
+.empty-state {
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  height:100%;gap:12px;color:var(--muted);text-align:center;padding:32px;
+}
+
+.empty-hex {
+  font-size:48px;color:var(--border);
+  font-family:'Bebas Neue',sans-serif;letter-spacing:4px;
+}
+
+.empty-state p{font-size:12px;font-family:'IBM Plex Mono',monospace;line-height:1.7;max-width:280px;}
+
+/* Steps */
+.step {
+  border-radius:6px;overflow:hidden;
+  border:1px solid var(--border);
+  animation:fadeUp .3s ease;
+}
+
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+
+.step-header {
+  display:flex;align-items:center;gap:10px;
+  padding:10px 14px;
+  cursor:pointer;
+  background:var(--s1);
+  transition:background .15s;
+}
+
+.step-header:hover{background:var(--s2);}
+
+.step-icon {
+  width:26px;height:26px;border-radius:4px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:11px;flex-shrink:0;
+}
+
+.step.tool-call .step-icon{background:rgba(0,212,255,.12);color:var(--cyan);}
+.step.tool-result .step-icon{background:rgba(0,255,136,.1);color:var(--green);}
+.step.final .step-icon{background:rgba(167,139,250,.12);color:var(--purple);}
+.step.error .step-icon{background:rgba(255,69,96,.1);color:var(--red);}
+
+.step-label {
+  font-family:'IBM Plex Mono',monospace;
+  font-size:11px;flex:1;
+}
+
+.step.tool-call .step-label{color:var(--cyan);}
+.step.tool-result .step-label{color:var(--green);}
+.step.final .step-label{color:var(--purple);}
+
+.step-chevron {
+  font-size:10px;color:var(--muted);transition:transform .2s;
+}
+
+.step.open .step-chevron{transform:rotate(90deg);}
+
+.step-body {
+  display:none;padding:12px 14px;
+  border-top:1px solid var(--border);
+  background:var(--bg);
+}
+
+.step.open .step-body{display:block;}
+
+.step-json {
+  font-family:'IBM Plex Mono',monospace;font-size:11px;
+  line-height:1.7;color:var(--text);
+  white-space:pre-wrap;word-break:break-all;
+}
+
+/* Stats bar */
+.stats-bar {
+  padding:12px 16px;
+  border-top:1px solid var(--border);
+  background:var(--s0);
+  display:grid;grid-template-columns:repeat(4,1fr);gap:8px;
+}
+
+.stat-cell {
+  text-align:center;
+}
+
+.stat-num {
+  font-family:'Bebas Neue',sans-serif;
+  font-size:20px;letter-spacing:1px;
+  color:var(--bright);line-height:1;
+}
+
+.stat-num.danger{color:var(--red);}
+.stat-num.warn{color:var(--amber);}
+.stat-num.ok{color:var(--green);}
+
+.stat-lbl {
+  font-family:'IBM Plex Mono',monospace;
+  font-size:9px;letter-spacing:1.5px;text-transform:uppercase;
+  color:var(--muted);margin-top:3px;
+}
+
+/* Analysis output */
+.analysis-output {
+  padding:16px 20px;
+  border-top:1px solid var(--border);
+  background:var(--s0);
+  max-height:260px;overflow-y:auto;
+  flex-shrink:0;
+}
+
+.analysis-output::-webkit-scrollbar{width:4px;}
+.analysis-output::-webkit-scrollbar-thumb{background:var(--border);}
+
+.analysis-title {
+  font-family:'IBM Plex Mono',monospace;
+  font-size:10px;letter-spacing:2px;text-transform:uppercase;
+  color:var(--purple);margin-bottom:10px;
+  display:flex;align-items:center;gap:8px;
+}
+
+.analysis-title::after{
+  content:'';flex:1;height:1px;background:var(--border);
+}
+
+.analysis-md {
+  font-size:12.5px;line-height:1.8;color:var(--text);
+}
+
+.analysis-md h2,.analysis-md h3{
+  font-family:'IBM Plex Mono',monospace;
+  color:var(--cyan);font-size:11px;
+  letter-spacing:1.5px;text-transform:uppercase;
+  margin:12px 0 6px;
+}
+
+.analysis-md strong{color:var(--bright);}
+.analysis-md code{
+  background:rgba(0,212,255,.08);color:var(--cyan);
+  padding:1px 5px;border-radius:3px;font-size:11px;
+  font-family:'IBM Plex Mono',monospace;
+}
+
+.analysis-md pre{
+  background:rgba(0,0,0,.4);border:1px solid var(--border);
+  border-radius:4px;padding:10px;overflow-x:auto;margin:8px 0;
+}
+
+.analysis-md pre code{background:none;color:var(--amber);}
+
+.analysis-md ul,.analysis-md ol{padding-left:18px;margin:4px 0 8px;}
+.analysis-md li{margin:3px 0;}
+
+/* Pulsing "thinking" indicator */
+.thinking-step .step-icon::before{
+  content:'';display:inline-block;
+  width:8px;height:8px;border-radius:50%;background:var(--cyan);
+  animation:pulse2 1s infinite;
+}
+
+@keyframes pulse2{
+  0%,100%{opacity:1;transform:scale(1)}
+  50%{opacity:.4;transform:scale(.7)}
+}
+
+/* Level badges */
+.lvl {
+  display:inline-block;padding:1px 6px;border-radius:2px;
+  font-family:'IBM Plex Mono',monospace;font-size:10px;margin-right:4px;
+}
+
+.lvl-error{background:rgba(255,69,96,.15);color:var(--red);}
+.lvl-warn{background:rgba(255,182,39,.12);color:var(--amber);}
+.lvl-info{background:rgba(0,255,136,.08);color:var(--green);}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    LOG<span style="color:var(--green)">AGENT</span>
+    <div class="logo-badge">Agentic AI</div>
+  </div>
+  <div class="hdr-right">
+    <div class="hdr-pill" id="statusPill">
+      <div class="hdr-dot"></div>
+      <span id="statusText">READY</span>
+    </div>
+    <div class="hdr-pill active">
+      <div class="hdr-dot"></div>
+      <span>GEMINI 1.5</span>
+    </div>
+    <div class="hdr-pill active">
+      <div class="hdr-dot"></div>
+      <span>4 TOOLS</span>
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+  <!-- LEFT: Log Input -->
+  <div class="input-panel">
+    <div class="panel-header">
+      <div class="panel-title"><span>//</span> LOG INPUT</div>
+      <div class="btn-row">
+        <button class="btn" onclick="clearAll()">CLR</button>
+        <button class="btn-run btn" id="runBtn" onclick="runAgent()">
+          <div class="spinner"></div>
+          <span class="run-arrow">▶ ANALYZE</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:1px">SAMPLES:</span>
+      <button class="sample-btn" onclick="loadSample('crash')">app-crash.log</button>
+      <button class="sample-btn" onclick="loadSample('k8s')">k8s-oom.log</button>
+      <button class="sample-btn" onclick="loadSample('perf')">latency-spike.log</button>
+      <button class="sample-btn" onclick="loadSample('nginx')">nginx-errors.log</button>
+    </div>
+
+    <div class="log-input-wrap">
+      <textarea
+        class="log-textarea"
+        id="logInput"
+        placeholder="Paste your logs here...&#10;&#10;Supports: Docker, K8s, Nginx, App logs, Stack traces&#10;&#10;→ Press ANALYZE to run the agentic pipeline"
+        spellcheck="false"
+      ></textarea>
+    </div>
+
+    <div class="config-bar">
+      <input type="password" id="apiKey" placeholder="Gemini API Key — or set GEMINI_API_KEY env var"/>
+      <input type="text" id="backendUrl" value="http://localhost:8001" style="max-width:180px;flex:none;font-size:10px"/>
+    </div>
+  </div>
+
+  <!-- RIGHT: Agent panel -->
+  <div class="agent-panel">
+    <div class="agent-header">
+      <div class="panel-title"><span>//</span> AGENT REASONING CHAIN</div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted)" id="stepCount">0 STEPS</div>
+    </div>
+
+    <div class="agent-steps" id="agentSteps">
+      <div class="empty-state">
+        <div class="empty-hex">LOG<br>AGENT</div>
+        <p>Paste logs and click ANALYZE.<br/>The AI agent will autonomously call tools to investigate your logs.</p>
+        <div style="margin-top:12px;display:flex;flex-direction:column;gap:4px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted);">
+          <div>① parse_log_structure</div>
+          <div>② extract_error_patterns</div>
+          <div>③ check_kubernetes_signals</div>
+          <div>④ analyze_performance_metrics</div>
+          <div style="color:var(--purple);margin-top:4px">⑤ AI root cause synthesis</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stats-bar" id="statsBar" style="display:none">
+      <div class="stat-cell">
+        <div class="stat-num" id="statLines">—</div>
+        <div class="stat-lbl">LOG LINES</div>
+      </div>
+      <div class="stat-cell">
+        <div class="stat-num danger" id="statErrors">—</div>
+        <div class="stat-lbl">ERRORS</div>
+      </div>
+      <div class="stat-cell">
+        <div class="stat-num warn" id="statK8s">—</div>
+        <div class="stat-lbl">K8S ISSUES</div>
+      </div>
+      <div class="stat-cell">
+        <div class="stat-num" id="statLatency">—</div>
+        <div class="stat-lbl">AVG MS</div>
+      </div>
+    </div>
+
+    <div class="analysis-output" id="analysisOutput" style="display:none">
+      <div class="analysis-title">AI ROOT CAUSE ANALYSIS</div>
+      <div class="analysis-md" id="analysisMd"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const SAMPLES = {
+  crash: `2024-01-15 10:00:01 INFO  [nginx] Starting server on :8080
+2024-01-15 10:00:02 INFO  [app] Connected to PostgreSQL at db:5432
+2024-01-15 10:00:05 INFO  [app] Loaded 1240 routes
+2024-01-15 10:01:22 INFO  [app] GET /api/users 200 45ms
+2024-01-15 10:01:23 INFO  [app] GET /api/products 200 120ms
+2024-01-15 10:02:10 WARN  [app] Slow query detected: SELECT * FROM orders took 1450ms
+2024-01-15 10:02:11 ERROR [db] Connection pool exhausted: max=20, active=20, idle=0
+2024-01-15 10:02:12 ERROR [app] Failed to acquire DB connection after 5000ms timeout
+2024-01-15 10:02:12 ERROR [app] java.sql.SQLException: Timeout waiting for connection
+    at com.zaxxer.hikari.pool.HikariPool.getConnection(HikariPool.java:213)
+    at com.myapp.repo.OrderRepository.findAll(OrderRepository.java:89)
+2024-01-15 10:02:13 ERROR [nginx] 503 Service Unavailable: upstream /api/orders
+2024-01-15 10:02:15 WARN  [k8s] Pod payment-service-7d9f8b Running -> CrashLoopBackOff
+2024-01-15 10:02:16 ERROR [k8s] OOMKilled: container payment-service exceeded memory limit 512Mi
+2024-01-15 10:03:20 CRITICAL [app] Circuit breaker OPEN: payment-service unavailable`,
+
+  k8s: `2024-01-16 08:00:00 INFO  [kubelet] Starting node worker-02
+2024-01-16 08:00:10 INFO  [kubelet] Node worker-02 ready
+2024-01-16 08:15:00 WARN  [k8s] Node worker-02 DiskPressure: available 1.2Gi / 50Gi
+2024-01-16 08:20:00 WARN  [k8s] Eviction threshold hit: imagefs.available < 5%
+2024-01-16 08:20:05 ERROR [k8s] Pod frontend-abc123 evicted due to disk pressure
+2024-01-16 08:20:06 ERROR [k8s] Pod backend-def456 evicted due to disk pressure
+2024-01-16 08:20:10 ERROR [k8s] ErrImagePull: Failed to pull image "myregistry.io/api:v2.1.0"
+2024-01-16 08:20:10 ERROR [k8s] ImagePullBackOff: Back-off pulling image
+2024-01-16 08:21:00 ERROR [k8s] Pod api-server-789 CrashLoopBackOff (restarts: 8)
+2024-01-16 08:21:05 ERROR [k8s] OOMKilled: container api exceeded 256Mi limit
+2024-01-16 08:21:10 WARN  [k8s] Node worker-02 NotReady: kubelet stopped posting status
+2024-01-16 08:22:00 ERROR [k8s] TLS certificate expired: cluster-ca.crt (2024-01-15)
+2024-01-16 08:22:01 ERROR [k8s] x509: certificate has expired or is not yet valid`,
+
+  perf: `2024-01-17 14:00:00 INFO  [api] Server started
+2024-01-17 14:01:00 INFO  [api] GET /health 200 2ms
+2024-01-17 14:02:00 INFO  [api] POST /api/order 200 95ms
+2024-01-17 14:03:00 INFO  [api] GET /api/products 200 145ms
+2024-01-17 14:04:00 WARN  [api] POST /api/order 200 890ms - slow response
+2024-01-17 14:04:30 WARN  [api] GET /api/cart 200 1230ms - exceeds SLA
+2024-01-17 14:05:00 ERROR [api] GET /api/checkout 504 3450ms - gateway timeout
+2024-01-17 14:05:10 ERROR [api] POST /api/payment 504 5200ms - gateway timeout
+2024-01-17 14:05:20 ERROR [db] Slow query: SELECT * FROM inventory took 2800ms
+2024-01-17 14:05:30 ERROR [redis] Connection timeout after 1000ms
+2024-01-17 14:05:35 ERROR [api] GET /api/products 500 - redis unavailable
+2024-01-17 14:06:00 ERROR [api] POST /api/order 503 - downstream service unreachable
+2024-01-17 14:06:10 WARN  [api] Rate limit approaching: 4800/5000 req/min
+2024-01-17 14:06:15 ERROR [nginx] 429 Too Many Requests - rate limit exceeded`,
+
+  nginx: `2024-01-18 09:00:00 INFO  [nginx] nginx/1.24.0 started
+2024-01-18 09:01:00 INFO  [nginx] GET /index.html 200 1ms
+2024-01-18 09:02:00 WARN  [nginx] client 192.168.1.100 exceeded rate limit
+2024-01-18 09:02:01 ERROR [nginx] 429 Too Many Requests: 192.168.1.100
+2024-01-18 09:03:00 ERROR [nginx] 502 Bad Gateway: upstream connection refused
+2024-01-18 09:03:01 ERROR [nginx] 502 Bad Gateway: upstream connection refused
+2024-01-18 09:03:02 ERROR [nginx] 502 Bad Gateway: upstream connection refused
+2024-01-18 09:03:10 WARN  [nginx] upstream response timeout: 30s exceeded
+2024-01-18 09:03:11 ERROR [nginx] 504 Gateway Timeout: /api/slow-endpoint
+2024-01-18 09:04:00 ERROR [nginx] SSL_do_handshake() failed: certificate verify failed
+2024-01-18 09:04:01 ERROR [nginx] 495 SSL Certificate Error
+2024-01-18 09:05:00 WARN  [nginx] 1024 open connections - approaching worker limit
+2024-01-18 09:05:10 ERROR [nginx] worker process exceeded open file limit (1024)
+2024-01-18 09:05:15 ERROR [nginx] 500 Internal Server Error: worker connection overflow`
+};
+
+function loadSample(key) {
+  document.getElementById('logInput').value = SAMPLES[key];
+}
+
+function clearAll() {
+  document.getElementById('logInput').value = '';
+  document.getElementById('agentSteps').innerHTML = `
+    <div class="empty-state">
+      <div class="empty-hex">LOG<br>AGENT</div>
+      <p>Paste logs and click ANALYZE.</p>
+    </div>`;
+  document.getElementById('statsBar').style.display = 'none';
+  document.getElementById('analysisOutput').style.display = 'none';
+  document.getElementById('stepCount').textContent = '0 STEPS';
+}
+
+function setStatus(text, active) {
+  document.getElementById('statusText').textContent = text;
+  document.getElementById('statusPill').className = 'hdr-pill' + (active ? ' active' : '');
+}
+
+function addStep(type, name, data) {
+  const container = document.getElementById('agentSteps');
+
+  // Remove empty state if present
+  const empty = container.querySelector('.empty-state');
+  if (empty) empty.remove();
+
+  const icons = {
+    'tool_call': '⚙',
+    'tool_result': '✓',
+    'final': '★',
+    'thinking': '◎',
+    'error': '✗'
+  };
+
+  const labels = {
+    'tool_call': `CALLING → ${name}`,
+    'tool_result': `RESULT ← ${name}`,
+    'final': 'AI ANALYSIS COMPLETE',
+    'thinking': 'AGENT THINKING...',
+    'error': `ERROR: ${name}`
+  };
+
+  const div = document.createElement('div');
+  div.className = `step ${type}`;
+
+  const preview = data ? JSON.stringify(data).slice(0, 80) + (JSON.stringify(data).length > 80 ? '…' : '') : '';
+
+  div.innerHTML = `
+    <div class="step-header" onclick="toggleStep(this)">
+      <div class="step-icon">${icons[type] || '?'}</div>
+      <div style="flex:1">
+        <div class="step-label">${labels[type] || type}</div>
+        ${preview ? `<div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:340px">${escHtml(preview)}</div>` : ''}
+      </div>
+      <div class="step-chevron">▶</div>
+    </div>
+    ${data ? `<div class="step-body"><div class="step-json">${escHtml(JSON.stringify(data, null, 2))}</div></div>` : ''}
+  `;
+
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+
+  const count = container.querySelectorAll('.step').length;
+  document.getElementById('stepCount').textContent = `${count} STEP${count === 1 ? '' : 'S'}`;
+  return div;
+}
+
+function toggleStep(header) {
+  header.parentElement.classList.toggle('open');
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function renderMarkdown(text) {
+  return text
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    .replace(/^# (.+)$/gm, '<h2>$1</h2>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+    .replace(/```(\w+)?\n([\s\S]*?)```/g, (_, lang, code) =>
+      `<pre><code>${escHtml(code.trim())}</code></pre>`)
+    .replace(/^[-*] (.+)$/gm, '<li>$1</li>')
+    .replace(/(<li>[\s\S]+?<\/li>)/g, '<ul>$1</ul>')
+    .replace(/\n{2,}/g, '<br><br>')
+    .replace(/\n/g, '<br>');
+}
+
+function updateStats(stats) {
+  const bar = document.getElementById('statsBar');
+  bar.style.display = 'grid';
+
+  const lines = stats.total_lines || 0;
+  const errors = stats.total_errors || 0;
+  const k8s = (stats.k8s_issues || []).length;
+  const lat = stats.avg_latency_ms;
+
+  document.getElementById('statLines').textContent = lines;
+  document.getElementById('statErrors').textContent = errors;
+  document.getElementById('statK8s').textContent = k8s;
+  document.getElementById('statLatency').textContent = lat ? `${lat}` : '—';
+
+  // Color coding
+  document.getElementById('statErrors').className = `stat-num ${errors > 0 ? 'danger' : 'ok'}`;
+  document.getElementById('statK8s').className = `stat-num ${k8s > 0 ? 'warn' : 'ok'}`;
+  const latEl = document.getElementById('statLatency');
+  if (lat) latEl.className = `stat-num ${lat > 500 ? 'danger' : lat > 200 ? 'warn' : 'ok'}`;
+}
+
+async function runAgent() {
+  const log = document.getElementById('logInput').value.trim();
+  if (!log) {
+    alert('Please paste some logs first!');
+    return;
+  }
+
+  const apiKey = document.getElementById('apiKey').value.trim();
+  const backend = document.getElementById('backendUrl').value.trim();
+
+  const btn = document.getElementById('runBtn');
+  btn.disabled = true;
+  btn.classList.add('loading');
+
+  // Reset UI
+  const container = document.getElementById('agentSteps');
+  container.innerHTML = '';
+  document.getElementById('statsBar').style.display = 'none';
+  document.getElementById('analysisOutput').style.display = 'none';
+  document.getElementById('stepCount').textContent = '0 STEPS';
+
+  setStatus('RUNNING', true);
+
+  // Add thinking step
+  const thinkingDiv = addStep('thinking', null, null);
+  thinkingDiv.classList.add('thinking-step');
+
+  try {
+    const res = await fetch(`${backend}/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ log_text: log, gemini_key: apiKey || undefined })
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+
+    // Remove thinking indicator
+    thinkingDiv.remove();
+
+    // Render each step
+    for (const step of data.steps) {
+      if (step.type === 'tool_call') {
+        addStep('tool_call', step.name, step.input);
+      } else if (step.type === 'tool_result') {
+        addStep('tool_result', step.name, step.output);
+      } else if (step.type === 'final') {
+        addStep('final', null, null);
+      }
+    }
+
+    // Stats
+    updateStats(data.stats);
+
+    // Analysis
+    if (data.final_analysis) {
+      const output = document.getElementById('analysisOutput');
+      output.style.display = 'block';
+      document.getElementById('analysisMd').innerHTML = renderMarkdown(data.final_analysis);
+    }
+
+    setStatus('DONE', false);
+
+  } catch (err) {
+    thinkingDiv.remove();
+    addStep('error', err.message, {
+      hint: 'Make sure the backend is running: docker-compose up',
+      error: err.message
+    });
+    setStatus('ERROR', false);
+  }
+
+  btn.disabled = false;
+  btn.classList.remove('loading');
+}
+</script>
+</body>
+</html>
