@@ -79,8 +79,12 @@ GEMINI_API_KEY=your_gemini_key
 JENKINS_URL=http://localhost:8080
 JENKINS_USER=your_jenkins_user
 JENKINS_TOKEN=your_jenkins_token
+ALERT_EMAIL=
+SMTP_EMAIL=
+SMTP_PASSWORD=
 
 Get your Gemini API key at https://aistudio.google.com/apikey
+you get get app password for SMTP_PASSWORD-- https://myaccount.google.com/apppasswords
 
 ### Step 3 - Install dependencies
 ```bash

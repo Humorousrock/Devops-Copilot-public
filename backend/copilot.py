@@ -18,6 +18,16 @@ import threading
 import sys
 import os
 
+import smtplib
+import threading
+import time
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+ALERT_EMAIL  = os.getenv("ALERT_EMAIL", "")
+SMTP_EMAIL   = os.getenv("SMTP_EMAIL", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+
 def start_log_agent():
     backend_dir = os.path.dirname(os.path.abspath(__file__))
     subprocess.run(
@@ -36,6 +46,148 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 JENKINS_URL   = os.getenv("JENKINS_URL", "")
 JENKINS_USER  = os.getenv("JENKINS_USER", "")
 JENKINS_TOKEN = os.getenv("JENKINS_TOKEN", "")
+
+def send_alert_email(subject: str, body: str) -> dict:
+    try:
+        if not SMTP_EMAIL or not SMTP_PASSWORD:
+            return {"error": "SMTP credentials not set in .env"}
+
+        msg = MIMEMultipart()
+        msg["From"]    = SMTP_EMAIL
+        msg["To"]      = ALERT_EMAIL
+        msg["Subject"] = subject
+
+        msg.attach(MIMEText(body, "html"))
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(SMTP_EMAIL, SMTP_PASSWORD)
+            server.send_message(msg)
+
+        return {
+            "status":  "sent",
+            "to":      ALERT_EMAIL,
+            "subject": subject
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
+
+def auto_monitor_and_alert() -> dict:
+    try:
+        # get all pods
+        result = subprocess.run(
+            ["kubectl", "get", "pods",
+             "--all-namespaces", "-o", "json"],
+            capture_output=True, text=True
+        )
+        data = json.loads(result.stdout)
+
+        problematic_pods = []
+
+        for pod in data["items"]:
+            restarts = 0
+            if pod["status"].get("containerStatuses"):
+                restarts = sum(
+                    cs["restartCount"]
+                    for cs in pod["status"]["containerStatuses"]
+                )
+
+            # check if restarts > 2
+            if restarts > 2:
+                name = pod["metadata"]["name"]
+                ns   = pod["metadata"]["namespace"]
+
+                # get logs
+                logs = subprocess.run(
+                    ["kubectl", "logs", name,
+                     "-n", ns, "--tail=20"],
+                    capture_output=True, text=True
+                )
+
+                # describe pod
+                describe = subprocess.run(
+                    ["kubectl", "describe", "pod",
+                     name, "-n", ns],
+                    capture_output=True, text=True
+                )
+
+                # extract events from describe
+                events = ""
+                for line in describe.stdout.split("\n"):
+                    if "Events:" in line or "Warning" in line or "Error" in line:
+                        events += line + "\n"
+
+                problematic_pods.append({
+                    "name":      name,
+                    "namespace": ns,
+                    "restarts":  restarts,
+                    "logs":      logs.stdout[-1000:],
+                    "events":    events[-500:]
+                })
+
+        if not problematic_pods:
+            return {
+                "status":  "healthy",
+                "message": "All pods healthy — no restarts > 2"
+            }
+
+        # build email
+        email_body = """
+        <html><body>
+        <h2 style="color:red">🚨 DevOps Copilot Alert</h2>
+        <p>The following pods have more than 2 restarts and may need attention:</p>
+        """
+
+        for pod in problematic_pods:
+            email_body += f"""
+            <hr>
+            <h3>Pod: {pod['name']}</h3>
+            <p><b>Namespace:</b> {pod['namespace']}</p>
+            <p><b>Restarts:</b> {pod['restarts']}</p>
+            <h4>Recent Logs:</h4>
+            <pre style="background:#f0f0f0;padding:10px">{pod['logs']}</pre>
+            <h4>Events:</h4>
+            <pre style="background:#f0f0f0;padding:10px">{pod['events']}</pre>
+            """
+
+        email_body += """
+        <hr>
+        <p>Please investigate these pods immediately.</p>
+        <p><i>Sent by DevOps Copilot Agent</i></p>
+        </body></html>
+        """
+
+        # send email
+        subject = f"🚨 Alert: {len(problematic_pods)} pod(s) restarting — {problematic_pods[0]['name']}"
+        email_result = send_alert_email(subject, email_body)
+
+        return {
+            "status":           "alert_sent",
+            "problematic_pods": len(problematic_pods),
+            "pods":             [p["name"] for p in problematic_pods],
+            "email":            email_result,
+            "details":          problematic_pods
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
+
+def background_monitor():
+    while True:
+        try:
+            result = auto_monitor_and_alert()
+            if result.get("status") == "alert_sent":
+                print(f"[MONITOR] Alert sent for {result['problematic_pods']} pods")
+        except Exception as e:
+            print(f"[MONITOR] Error: {e}")
+        time.sleep(300)  # check every 5 minutes
+
+# start background monitor
+monitor_thread = threading.Thread(
+    target=background_monitor, 
+    daemon=True
+)
+monitor_thread.start()
 
 def get_kubernetes_status(namespace: str = "default") -> dict:
     try:
@@ -107,6 +259,100 @@ def get_pod_logs(pod_name: str, lines: int = 50) -> dict:
             "lines":     logs.stdout.split("\n") if logs.stdout else ["No logs available"],
             "stderr":    logs.stderr
         }
+    except Exception as e:
+        return {"error": str(e)}
+
+def restart_pod(pod_name: str, namespace: str = "default") -> dict:
+    try:
+        # find full pod name and namespace
+        result = subprocess.run(
+            ["kubectl", "get", "pods", 
+             "--all-namespaces", "-o", "json"],
+            capture_output=True, text=True
+        )
+        pods = json.loads(result.stdout)["items"]
+
+        matched = next(
+            (p for p in pods
+             if pod_name.lower() in p["metadata"]["name"].lower()),
+            None
+        )
+
+        if not matched:
+            return {"error": f"Pod not found: {pod_name}"}
+
+        name = matched["metadata"]["name"]
+        ns   = matched["metadata"]["namespace"]
+
+        # delete pod — K8s will restart it automatically
+        delete = subprocess.run(
+            ["kubectl", "delete", "pod", 
+             name, "-n", ns],
+            capture_output=True, text=True
+        )
+
+        if delete.returncode == 0:
+            return {
+                "status":    "restarted",
+                "pod":       name,
+                "namespace": ns,
+                "message":   f"Pod {name} deleted — Kubernetes will restart it automatically"
+            }
+        else:
+            return {"error": delete.stderr}
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def restart_deployment(deployment_name: str, namespace: str = "default") -> dict:
+    try:
+        # find namespace if not specified
+        result = subprocess.run(
+            ["kubectl", "get", "deployments",
+             "--all-namespaces", "-o", "json"],
+            capture_output=True, text=True
+        )
+        data = json.loads(result.stdout)
+
+        matched = next(
+            (d for d in data["items"]
+             if deployment_name.lower() in 
+             d["metadata"]["name"].lower()),
+            None
+        )
+
+        if not matched:
+            return {"error": f"Deployment not found: {deployment_name}"}
+
+        name = matched["metadata"]["name"]
+        ns   = matched["metadata"]["namespace"]
+
+        # rolling restart
+        restart = subprocess.run(
+            ["kubectl", "rollout", "restart",
+             f"deployment/{name}", "-n", ns],
+            capture_output=True, text=True
+        )
+
+        if restart.returncode == 0:
+            # check rollout status
+            status = subprocess.run(
+                ["kubectl", "rollout", "status",
+                 f"deployment/{name}", "-n", ns,
+                 "--timeout=30s"],
+                capture_output=True, text=True
+            )
+            return {
+                "status":     "restarted",
+                "deployment": name,
+                "namespace":  ns,
+                "message":    f"Deployment {name} rolling restart triggered",
+                "rollout":    status.stdout
+            }
+        else:
+            return {"error": restart.stderr}
+
     except Exception as e:
         return {"error": str(e)}
 
@@ -298,6 +544,79 @@ def get_jenkins_pipeline_status(job_name: str = "all") -> dict:
 
     except Exception as e:
         return {"error": str(e)}
+    
+def trigger_jenkins_build(job_name: str, branch: str = "") -> dict:
+    try:
+        auth = HTTPBasicAuth(JENKINS_USER, JENKINS_TOKEN)
+
+        if branch:
+            url = f"{JENKINS_URL}/job/{job_name}/buildWithParameters?branch={branch}"
+        else:
+            url = f"{JENKINS_URL}/job/{job_name}/build"
+
+        res = requests.post(url, auth=auth, timeout=10)
+
+        if res.status_code in [200, 201]:
+            return {
+                "status":  "triggered",
+                "job":     job_name,
+                "branch":  branch or "default",
+                "message": f"Build triggered for {job_name} on branch {branch or 'default'}"
+            }
+        else:
+            return {"error": f"Failed: {res.status_code}"}
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def restart_all_failed_pipelines() -> dict:
+    try:
+        auth = HTTPBasicAuth(JENKINS_USER, JENKINS_TOKEN)
+
+        res = requests.get(
+            f"{JENKINS_URL}/api/json?tree=jobs[name,color,url]",
+            auth=auth, timeout=10
+        )
+
+        if res.status_code != 200:
+            return {"error": f"Jenkins returned {res.status_code}"}
+
+        all_jobs = res.json()["jobs"]
+        triggered = []
+        failed_to_trigger = []
+
+        for job in all_jobs:
+            build_res = requests.get(
+                f"{job['url']}lastBuild/api/json",
+                auth=auth, timeout=10
+            )
+
+            if build_res.status_code != 200:
+                continue
+
+            build = build_res.json()
+
+            if build.get("result") == "FAILURE":
+                trigger_res = requests.post(
+                    f"{JENKINS_URL}/job/{job['name']}/build",
+                    auth=auth, timeout=10
+                )
+
+                if trigger_res.status_code in [200, 201]:
+                    triggered.append(job["name"])
+                else:
+                    failed_to_trigger.append(job["name"])
+
+        return {
+            "total_triggered":   len(triggered),
+            "triggered_jobs":    triggered,
+            "failed_to_trigger": failed_to_trigger,
+            "message":           f"Restarted {len(triggered)} failed pipelines"
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
 
 TOOL_MAP = {
     "get_kubernetes_status":    get_kubernetes_status,
@@ -307,6 +626,12 @@ TOOL_MAP = {
     "get_resource_metrics":     get_resource_metrics,
     "generate_runbook":         generate_runbook,
     "get_jenkins_pipeline_status": get_jenkins_pipeline_status,
+    "trigger_jenkins_build":          trigger_jenkins_build,          
+    "restart_all_failed_pipelines":   restart_all_failed_pipelines, 
+    "restart_pod":                    restart_pod,         
+    "restart_deployment":             restart_deployment,  
+    "auto_monitor_and_alert": auto_monitor_and_alert,
+    "send_alert_email":       send_alert_email,
 }
 
 GEMINI_TOOLS = types.Tool(function_declarations=[
@@ -316,6 +641,32 @@ GEMINI_TOOLS = types.Tool(function_declarations=[
         parameters=types.Schema(type=types.Type.OBJECT, properties={
             "namespace": types.Schema(type=types.Type.STRING, description="K8s namespace (default: default)")
         })
+    ),
+        types.FunctionDeclaration(
+        name="trigger_jenkins_build",
+        description="Trigger a Jenkins pipeline build for a specific job and optional branch.",
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "job_name": types.Schema(
+                    type=types.Type.STRING,
+                    description="Jenkins job name to trigger"
+                ),
+                "branch": types.Schema(
+                    type=types.Type.STRING,
+                    description="Branch name to build (optional)"
+                )
+            },
+            required=["job_name"]
+        )
+    ),
+    types.FunctionDeclaration(
+        name="restart_all_failed_pipelines",
+        description="Restart all failed Jenkins pipelines automatically.",
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={}
+        )
     ),
     types.FunctionDeclaration(
         name="get_pod_logs",
@@ -328,6 +679,33 @@ GEMINI_TOOLS = types.Tool(function_declarations=[
             required=["pod_name"]
         )
     ),
+    types.FunctionDeclaration(
+        name="auto_monitor_and_alert",
+        description="Check all pods for restarts > 2, analyze logs and send email alert.",
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={}
+        )
+    ),
+    types.FunctionDeclaration(
+        name="send_alert_email",
+        description="Send an email alert about infrastructure issues.",
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "subject": types.Schema(
+                    type=types.Type.STRING,
+                    description="Email subject"
+                ),
+                "body": types.Schema(
+                    type=types.Type.STRING,
+                    description="Email body content"
+                )
+            },
+            required=["subject", "body"]
+        )
+    ),
+
     types.FunctionDeclaration(
         name="get_cicd_pipeline_status",
         description="Check GitHub Actions CI/CD pipeline status.",
@@ -358,6 +736,43 @@ GEMINI_TOOLS = types.Tool(function_declarations=[
         )
     ),
     types.FunctionDeclaration(
+        name="restart_pod",
+        description="Restart a specific Kubernetes pod by deleting it. Kubernetes will automatically recreate it.",
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "pod_name": types.Schema(
+                    type=types.Type.STRING,
+                    description="Pod name or partial name to restart"
+                ),
+                "namespace": types.Schema(
+                    type=types.Type.STRING,
+                    description="Namespace of the pod (default: default)"
+                )
+            },
+            required=["pod_name"]
+        )
+    ),
+    types.FunctionDeclaration(
+        name="restart_deployment",
+        description="Restart a Kubernetes deployment with rolling restart. Zero downtime.",
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "deployment_name": types.Schema(
+                    type=types.Type.STRING,
+                    description="Deployment name or partial name to restart"
+                ),
+                "namespace": types.Schema(
+                    type=types.Type.STRING,
+                    description="Namespace of deployment (default: default)"
+                )
+            },
+            required=["deployment_name"]
+        )
+    ),
+    
+    types.FunctionDeclaration(
     name="get_jenkins_pipeline_status",
     description="Fetch Jenkins pipeline status, build errors and console logs for failed jobs.",
     parameters=types.Schema(
@@ -383,6 +798,13 @@ IMPORTANT RULES:
 - For ANY question about logs → always call get_pod_logs
 - For ANY question about alerts → always call get_monitoring_alerts
 - For ANY question about CPU, memory, metrics → always call get_resource_metrics
+- For ANY request to monitor pods and send alerts → call auto_monitor_and_alert
+- For ANY request to send email → call send_alert_email
+- For ANY request to restart/trigger a specific pipeline → call trigger_jenkins_build
+- For ANY request to restart all failed pipelines → call restart_all_failed_pipelines
+- For ANY request to restart a pod → call restart_pod
+- For ANY request to restart a deployment → call restart_deployment
+- For ANY request to restart ALL pods → call get_kubernetes_status first then restart each pod
 - NEVER say you cannot check something — always try the tool first!"""
 
 class Message(BaseModel):
